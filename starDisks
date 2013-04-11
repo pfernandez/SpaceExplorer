@@ -1,0 +1,344 @@
+#!/bin/bash
+#
+# This script will be executed when spaceExplorer.sh is run.
+#
+# Compiles and runs equilibrium and torus models and obtains results.
+# To restart models automatically if Y2 has not converged when maxSteps
+# has been reached, set "neverRestart" to "false" in the notDone
+# function at the top of the getValues script.
+
+
+n=$1
+q=$2
+m=$3
+starMass=$4
+jin=$5
+maxSteps=$6
+jmax=$7
+scriptDir=$(dirname `dirname $(pwd)`)
+val="$scriptDir/./getValues $(pwd)"
+chmod +x $scriptDir/getValues
+
+
+
+####################################################################################################
+# RUN EQUILIBRIUM MODEL
+
+echo "Compiling hscf.f..."
+cp $scriptDir/hscf.f .
+echo "
+	  parameter (jmax = ${jmax},
+     1           kmax = ${jmax}, 
+     2           max = 25000)
+
+c     32x32     wfw(452)
+c     64x64     wfw(1030)
+c     128x128   wfw(2315)
+c     256x256   wfw(5132)
+c     512x512   wfw(11279)
+c     1024x1024 wfw(24593)
+c     2048x2048 wfw(53264)
+" > param.h
+
+# ifort -O -mp -r8 -o hscf hscf.f
+gfortran -fdefault-real-8 -O2 -o hscf hscf.f
+
+echo "Running equilibrium model..."
+echo "1                                      :  0 = white dwarf   1 = polytrope
+0                                      :  0 = dead start    1 = jump start
+${n} -${q} ${jmax} ${jmax} ${jmax} -${jin} 0.0 0.8 ${starMass}  :  n n' jold kold jout kout log(rho) del starm
+" > hscf.in
+./hscf < hscf.in > hscf.out
+rm param.h hscf hscf.in hscf.f
+	
+	#plot eqContour
+echo "Generating contour plot..."
+r=`echo "scale=2; $($val rInOut)/1" | bc`
+plotCommand="
+reset\n
+set terminal png\n
+set output \"eqContour.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set contour\n
+set cntrparam levels incremental 1.0e-30,$(echo "scale=7; $($val rhomax)/10" | bc),$($val rhomax)\n
+set size square\n
+set grid\n
+set mxtics\n
+set mytics\n
+set nosurface\n
+set view 0,0\n
+set data style lines\n
+set nokey\n
+splot 'fort.47' ti \"fort.47\"\n
+"
+echo -e $plotCommand | gnuplot
+
+#
+####################################################################################################
+# RUN TORUS MODEL
+
+if [ $maxSteps -gt 0 ]; then
+	
+echo "Compiling torus.f..."
+cp $scriptDir/torus.f .
+echo "
+c      version: 9 May 2005
+
+      parameter (jmax=${jmax},jmax1=jmax+1,jmax2=jmax+2,jmax3=jmax-1,
+     1           kmax=${jmax},kmax1=kmax+1,kmax2=kmax+2,kmax3=kmax-1,
+     2           lmax=16,lmax1=lmax/2+1,lmax2=lmax-2,
+     3           max=25000,jkm1=jmax+kmax-1,neq=8)
+
+c     32x32     wfw(452) 
+c     64x64     wfw(1030)
+c     128x128   wfw(2312)
+c     256x256   wfw(5130)
+c     512x512   wfw(11276)
+c     1024x1024 wfw(24590)
+" > param.h
+
+# ifort -O -mp -r8 -o hscf hscf.f
+gfortran -fdefault-real-8 -O2 -o torus torus.f
+	
+echo "Running torus model..."
+rerun=0
+Time=0
+if [ -f fort.11 ] && [ ! -f fort.51 ]; then
+	mv fort.11 fort.51
+fi
+	###### restart if fort.51 already present
+if [ -f fort.51 ]; then
+	rerun=1
+	mv fort.51 fort.11
+	if [ -f fort.22 ]; then
+		numlines=$(cat fort.22 | wc -l)
+		ourline=$(( $numlines - $numlines % 100 ))
+		Time=$(sed -n ${ourline}p fort.22 | cut -c 1-15)
+	fi
+	if [ -f fort.23 ]; then 
+		if [ -f fort.23a ]; then
+			cp fort.23a temp
+			cat fort.23 >> temp
+			rm fort.23 fort.23a
+			mv temp fort.23
+		fi
+		cp fort.23 fort.23a
+	fi
+fi
+	
+	##### create torus.in file
+echo "fort.2
+${m}              : m
+0              : 1 turns off self gravity
+${n},0,.75      : n, 0 to use data file and 100xq otherwise, rin
+${q}            : q
+2.0            : tstep power
+${maxSteps}          : max steps
+${rerun},${Time}            : 1 to restart,time; mv fort.51 fort.11
+" > torus.in
+
+	##### execute with torus.in
+./torus < torus.in > torus.out
+rm param.h torus torus.in torus.f
+
+fi
+
+#
+####################################################################################################
+# GET RESULTS
+
+
+echo "Getting model results..."
+
+	# Combine new fort.23 if restarting
+if [ -f fort.23a ]; then
+	cp fort.23a temp
+	cat fort.23 >> temp
+	rm fort.23 fort.23a
+	mv temp fort.23
+fi
+
+
+	##### Generate and save images with gnuplot.
+r=`echo "scale=2; $($val rInOut)/1" | bc`
+
+	#plotit
+plotCommand="
+reset\n
+set terminal png\n
+set output \"plotit.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set logscale y\n
+set autoscale\n
+plot 'fort.23' using 1:2 with lines ti \"fort.23\",\
+	 'fort.23' using 1:4 with lines notitle,\
+	 'fort.23' using 1:6 with lines notitle\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#plotit2
+plotCommand="
+reset\n
+set terminal png\n
+set output \"plotit2.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set auto\n
+plot 'fort.23' using 1:3 with lines ti \"fort.23\",\
+	 'fort.23' using 1:5 with lines notitle,\
+	 'fort.23' using 1:7 with lines notitle\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee1
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee1.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set logscale y\n
+set auto\n
+plot 'fort.52' using 1:2 with lines lt 3 ti \"drho\",\
+	 'fort.52' using 1:3 with lines lt 1 ti \"dW\"\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee2m1/ee2m2
+if [ "${m}" = "1" ]; then
+	points="'fort.63' with points lt 1 ti \"W phase\",
+	 'fort.53' with points lt 3 ti \"drho phase\","
+elif [ "${m}" = "2" ]; then
+	points="'fort.63' with points lt 1 ti \"W phase\",
+	 'fort.53' with points lt 3 ti \"drho phase\",
+	 'fort.63' using 3:2 with points lt 1 notitle,
+	 'fort.53' using 3:2 with points lt 3 notitle,"
+elif [ "${m}" = "3" ]; then
+	points="'fort.64' with points lt 1 ti \"W phase\",
+	 'fort.54' with points lt 3 ti \"drho phase\",
+	 'fort.64' using 3:2 with points lt 1 notitle,
+	 'fort.54' using 3:2 with points lt 3 notitle,
+	 'fort.64' using 4:2 with points lt 1 notitle,
+	 'fort.54' using 4:2 with points lt 3 notitle,"
+elif [ "${m}" = "4" ]; then
+	points="'fort.63' with points lt 1 ti \"W phase\",
+	 'fort.53' with points lt 3 ti \"drho phase\",
+	 'fort.63' using 3:2 with points lt 1 notitle,
+	 'fort.53' using 3:2 with points lt 3 notitle,
+	 'fort.63' using 4:2 with points lt 1 notitle,
+	 'fort.53' using 4:2 with points lt 3 notitle,
+	 'fort.63' using 5:2 with points lt 1 notitle,
+	 'fort.53' using 5:2 with points lt 3 notitle,"
+fi
+rPlus=`echo "scale=2; $($val rPlusR0)/1" | bc`
+rMinus=`echo "scale=2; $($val rMinusR0)/1" | bc`
+if [ "$($val RcoR0)" = "NaN" ]; then
+	plotRcR0=0
+	dispRcR0=NaN
+elif [ `echo "$($val RcoR0) > $rPlus" | bc` = 1 ]; then
+	plotRcR0=0
+	dispRcR0=$(echo "scale=2; $($val RcoR0)/1" | bc)
+else
+	plotRcR0=$(echo "scale=2; $($val RcoR0)/1" | bc)
+	dispRcR0=$plotRcR0
+fi
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee2m${m}.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set polar\n
+set angles degrees\n
+set size square\n
+set samples 160,160\n
+set trange [0:360]\n
+plot ${points}
+	 ${rPlus} lt 3 ti \"r+/ro = ${rPlus}\",
+	 1.00 lt 4 ti \"ro/ro = 1.00\",
+	 ${rMinus} lt 3 ti \"r-/ro =  ${rMinus}\",
+	 ${plotRcR0} lt 5 ti \"rc/ro = ${dispRcR0}\"\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee3
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee3.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set auto\n
+plot 'fort.66' using 1:2 with lines lt 3 ti 'torque'\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee4
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee4.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set auto\n
+plot 'fort.27' using 1:3 with points lt 3 ti 'Ek',\
+	 'fort.27' using 1:2 with points lt 6 ti 'Eh'\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee5
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee5.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set auto\n
+plot 'fort.28' using 1:2 with points lt 0 ti 'R stress',\
+	 'fort.28' using 1:3 with points lt 1 ti 'G work',\
+	 'fort.28' using 1:4 with points lt 3 ti 'Acoustic flux'\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee6
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee6.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set auto\n
+plot 'fort.29' using 1:2 with lines ti 'dj'\n
+"
+echo -e $plotCommand | gnuplot
+
+
+	#ee8
+plotCommand="
+reset\n
+set terminal png\n
+set output \"ee8.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${starMass}/${jmax}\"\n
+set auto\n
+plot 'fort.76' using 1:2 with points lt 0 ti 'R stress/E',\
+	 'fort.76' using 1:3 with points lt 1 ti 'G work/E',\
+	 'fort.76' using 1:4 with points lt 3 ti 'Acoustic flux/E'\n
+"
+echo -e $plotCommand | gnuplot
+
+
+#
+####################################################################################################
+# RESTART IF REQUIRED
+
+
+if [ $($val notDone) ] && [ $maxSteps -gt 0 ]; then
+	echo -e "\nStarting another run..."
+	qsub -l nodes=1:ppn=1,walltime=168:00:00 -j oe -o output.txt ./$(basename `pwd`)
+else
+	echo -e "\nDone."
+fi
+
+
+#
+####################################################################################################

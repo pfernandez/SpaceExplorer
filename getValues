@@ -1,0 +1,603 @@
+#!/bin/bash
+#
+# Returns values based on input arguments. The first argument is the absolute
+# /path/to/folder of the pertinient data, the second is the name of a function below.
+
+max=$3
+gvUpStp=$4		# Step at which to change Y2 convergence test value.
+d1=$5			# Allowed difference between Y2 values before gvUpStep.
+d2=$6			# Allowed difference between Y2 values at or after gvUpStep.
+
+
+function notDone
+{	# Returns 1 if a run needs to be started or restarted, otherwise returns empty.
+	# Conditions are: if no growth rate convergence and less than "max" steps
+	# (set below,) or if fort.50 not present. Set neverRestart to false to enable.
+
+	neverRestart=false
+	
+	[ ! $max ] && max=200000
+	
+	if [ "$neverRestart" != "true" ]; then
+		if [ -f fort.50 ]; then
+			if [ "$(Y2)" = "0" ] && [ $(stepsCompleted) -lt $max ]; then
+				notDone=1
+			fi
+		else
+			notDone=1
+		fi
+	fi
+	echo $notDone
+}
+
+function stepsCompleted
+{
+	if [ -f fort.23a ]; then
+		steps=$(cat fort.23a | wc -l)
+	elif [ -f fort.23 ]; then
+		steps=$(cat fort.23 | wc -l)
+	else
+		steps=-1
+	fi
+	echo $steps
+}
+
+function isRunning
+{
+[ $(qstat -f | grep Job_Name | cut -c 16- | grep `basename $(pwd)`) ] && echo true;
+}
+
+function jVec
+{
+for folder in `ls`; do
+	if [ -f $folder/fort.50 ]; then
+		j=${folder##*j}; jVec="$jVec $j"
+	fi
+done
+echo $jVec | sed 's/ /\n/g' | sort -gu
+}
+
+function MVec
+{
+for folder in `ls`; do
+	if [ -f $folder/fort.50 ]; then
+		M=${folder%%j*}; M=${M##*M}; MVec="$MVec $M"
+	fi
+done
+echo $MVec | sed 's/ /\n/g' | sort -gu
+}
+
+function mVec
+{
+for folder in `ls`; do
+	if [ -f $folder/fort.50 ]; then
+		m=${folder%%M*}; m=${m##*m}; mVec="$mVec $m"
+	fi
+done
+echo $mVec | sed 's/ /\n/g' | sort -gu
+}
+
+function qVec
+{
+for folder in `ls`; do
+	if [ -f $folder/fort.50 ]; then
+		q=${folder%%m*}; q=${q##*q}; qVec="$qVec $q"
+	fi
+done
+echo $qVec | sed 's/ /\n/g' | sort -gu
+}
+
+function nVec
+{
+for folder in `ls`; do
+	if [ -f $folder/fort.50 ]; then
+		n=${folder%%q*}; n=${n##*n}; nVec="$nVec $n"
+	fi
+done
+echo $nVec | sed 's/ /\n/g' | sort -gu
+}
+
+function jmax
+{
+	jmax=`grep -w jmax fact | cut -c 22-25`
+	echo $jmax
+}
+
+function jtotp
+{
+	exp=`grep -w jtotp fact | cut -c 29-31`
+	base=`grep -w jtotp fact | cut -c 18-27`
+	jtotp=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $jtotp
+}
+
+function omegaMax
+{
+	exp=`grep -w omega\ max fact | cut -c 29-32`
+	base=`grep -w omega\ max fact | cut -c 18-27`
+	omegaMax=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $omegaMax
+}
+
+function etot
+{
+	exp=`grep -w etot fact | cut -c 29-32`
+	base=`grep -w etot fact | cut -c 18-27`
+	etot=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $etot
+}
+
+function tjeans
+{
+	exp=`grep -w tjeans: fact | cut -c 24-27`
+	base=`grep -w tjeans: fact | cut -c 16-22`
+	tjeans=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $tjeans
+}
+
+function tsound
+{
+	exp=`grep -w tsound: fact | cut -c 24-27`
+	base=`grep -w tsound: fact | cut -c 16-22`
+	tsound=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $tsound
+}
+
+function starMass
+{
+	exp=`grep -w star/disk: polyout | cut -c 24-26`
+	base=`grep -w star/disk: polyout | cut -c 16-22`
+	starMass=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $starMass
+}
+
+function TW
+{
+	exp=`grep -w t/\|w\| polyout | cut -c 36-38`
+	base=`grep -w t/\|w\| polyout | cut -c 28-34`
+	TW=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $TW
+}
+
+function rInOut
+{
+	exp=`grep -w r-/r+: polyout | cut -c 24-26`
+	base=`grep -w r-/r+: polyout | cut -c 16-22`
+	rInOut=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $rInOut
+}
+
+
+function rPlusR0
+{
+	exp=`grep -w r+/r0: polyout | cut -c 24-26`
+	base=`grep -w r+/r0: polyout | cut -c 16-22`
+	rPlusR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $rPlusR0
+}
+	
+function rMinusR0
+{
+	exp=`grep -w r-/ro: polyout | cut -c 24-26`
+	base=`grep -w r-/ro: polyout | cut -c 16-22`
+	rMinusR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $rMinusR0
+}
+
+function rhomax
+{
+	exp=`grep -w rhomax: polyout | cut -c 24-26`
+	base=`grep -w rhomax: polyout | cut -c 16-22`
+	rhomax=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $rhomax
+}
+
+function qMinusR0
+{
+	exp=`grep -w Q-/r0: polyout | cut -c 25-27`
+	base=`grep -w Q-/r0: polyout | cut -c 17-23`
+	qMinusR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $qMinusR0
+}	
+	
+function qPlusR0
+{
+	exp=`grep -w Q+/r0: polyout | cut -c 28-30`
+	base=`grep -w Q+/r0: polyout | cut -c 20-26`
+	qPlusR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $qPlusR0
+}
+
+function rLambdaR0
+{
+	exp=`grep -w rvortmax/r0: polyout | cut -c 28-30`
+	base=`grep -w rvortmax/r0: polyout | cut -c 20-26`
+	rLambdaR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $rLambdaR0
+}
+
+function MIRP
+{
+	exp=`grep -w MIRP: polyout | cut -c 24-26`
+	base=`grep -w MIRP: polyout | cut -c 16-22`
+	MIRP=`echo "scale=8; ($base/1)*10^(0$exp)" | bc`
+	echo $MIRP
+}
+
+function eta
+{
+	exp=`grep -w eta: polyout | cut -c 24-26`
+	base=`grep -w eta: polyout | cut -c 16-22`
+	eta=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $eta
+}
+
+function p
+{
+	printf '%.4f' `grep -w \ \ \ \ \ p: polyout | cut -c 16-26`
+}
+
+function tauzero
+{
+	exp=`grep -w tauzero: polyout | cut -c 24-26`
+	base=`grep -w tauzero: polyout | cut -c 16-22`
+	tauzero=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $tauzero
+}
+
+function sqrtTau
+{
+	printf '%.4f' `grep -w sqrtTau: polyout | cut -c 16-26`
+}
+
+function omegazero
+{
+	exp=`grep -w omegazero: polyout | cut -c 28-30`
+	base=`grep -w omegazero: polyout | cut -c 20-26`
+	omegazero=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $omegazero
+}
+
+function jeansfreq
+{
+	exp=`grep -w jeans\ freq: polyout | cut -c 28-30`
+	base=`grep -w jeans\ freq: polyout | cut -c 20-26`
+	jeansfreq=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $jeansfreq
+}
+
+function cfreqzero
+{
+	exp=`grep -w c\ freq\ zero: polyout | cut -c 28-30`
+	base=`grep -w c\ freq\ zero: polyout | cut -c 20-26`
+	cfreqzero=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $cfreqzero
+}
+
+function keplerfreq
+{
+	exp=`grep -w kepler\ freq: polyout | cut -c 28-30`
+	base=`grep -w kepler\ freq: polyout | cut -c 20-26`
+	keplerfreq=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $keplerfreq
+}
+
+function virialError
+{
+	exp=`grep -w virial\ error polyout | cut -c 36-39`
+	base=`grep -w virial\ error polyout | cut -c 28-34`
+	virialError=`echo "scale=8; ($base/1)*10^(0$exp)" | bc`
+	echo $virialError
+}
+
+function mass
+{
+	exp=`grep -w mass: polyout | cut -c 18-21`
+	base=`grep -w mass: polyout | cut -c 10-16`
+	mass=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $mass
+}
+
+function oneMinusRInR0
+{
+	exp=`grep -w 1\ -\ r-/r0: polyout | cut -c 26-29`
+	base=`grep -w 1\ -\ r-/r0: polyout | cut -c 18-24`
+	oneMinusRInR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $oneMinusRInR0
+}
+
+function r0
+{
+	exp=`grep -w \ \ \ \ \ r0: polyout | cut -c 21-24`
+	base=`grep -w \ \ \ \ \ r0: polyout | cut -c 13-19`
+	r0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	echo $r0
+}
+
+
+function checkConvergence
+{	# Y2 is the mode growth rate, and is used to determine whether frequency-based
+	# values are valid and whether to restart upon completion.
+
+		# check for inputs or set defaults
+	[ ! $gvUpStp ] && gvUpStp=100000
+	[ ! $d1 ] && d1=.001
+	[ ! $d2 ] && d2=.01
+	if [ $(stepsCompleted) -lt $gvUpStp ]; then d=$d1
+	else d=$d2;   fi
+
+		# screen for NaNs, convert to testable values
+	test1=`grep -w y2_1: fort.50 | cut -c 24-26`
+	if [ "$test1" = "NaN" ]; then n1=-999999
+	else
+		exp1=$test1
+		base1=`grep -w y2_1: fort.50 | cut -c 16-22`
+		yn1=`echo "scale=10; ($base1/1)*10^(0$exp1)" | bc`
+	fi
+	test2=`grep -w y2_2: fort.50 | cut -c 24-26`
+	if [ "$test2" = "NaN" ]; then n2=-888888
+	else
+		exp2=$test2
+		base2=`grep -w y2_2: fort.50 | cut -c 16-22`
+		yn2=`echo "scale=10; ($base2/1)*10^(0$exp2)" | bc`
+	fi
+	test3=`grep -w y2_3: fort.50 | cut -c 24-26`
+	if [ "$test3" = "NaN" ]; then n3=-777777
+	else
+		exp3=$test3
+		base3=`grep -w y2_3: fort.50 | cut -c 16-22`
+		yn3=`echo "scale=10; ($base3/1)*10^(0$exp3)" | bc`
+	fi
+
+		# calculate differences between y2 values
+	y2_12diff=$(echo "scale=10; sqrt(($yn1-($yn2))^2)" | bc);
+	y2_13diff=$(echo "scale=10; sqrt(($yn1-($yn3))^2)" | bc);
+	y2_23diff=$(echo "scale=10; sqrt(($yn2-($yn3))^2)" | bc);
+
+		# find smallest two differences and average them
+	if [ "$(echo "$y2_12diff < $y2_13diff" | bc)" = "1" ]; then
+		diff2=$y2_12diff
+		growthRate=`echo "scale=4; ($yn1 + $yn2)/2" | bc`
+		radius1=true
+		radius2=true
+		radius3=$NULL
+	else 
+		diff2=$y2_13diff
+		growthRate=`echo "scale=4; ($yn1 + $yn3)/2" | bc`
+		radius1=true
+		radius2=$NULL
+		radius3=true
+	fi
+	if [ "$(echo "$y2_23diff < $diff2" | bc)" = "1" ]; then
+		diff2=$y2_23diff
+		growthRate=`echo "scale=4; ($yn2 + $yn3)/2" | bc`
+		radius1=$NULL
+		radius2=true
+		radius3=true
+	fi
+
+		# test if average is less than specified requirement
+	if [ "$(echo "$diff2 < $d" | bc)" != "1" ]; then
+		growthRate=0
+		stable=true
+	fi
+}
+
+function Y2
+{
+	checkConvergence
+	echo $growthRate
+}	
+
+function Y1
+{
+	checkConvergence
+	if [ $stable ]; then avg="NaN"
+	else
+		#New method:
+		exp=`grep -w y1\ avg: fort.50 | cut -c 24-26`
+		base=`grep -w y1\ avg: fort.50 | cut -c 16-22`
+		avg=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+
+		#Old method using Y2 radii (obsolete:)
+		if [ ]; then #BEGIN COMMENTBLOCK
+				# get values from correct radii
+			if [ $radius1 ]; then
+				exp=`grep -w y1_1: fort.50 | cut -c 24-26`
+				base=`grep -w y1_1: fort.50 | cut -c 16-22`
+				n1=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+			fi
+			if [ $radius2 ]; then
+				exp=`grep -w y1_2: fort.50 | cut -c 24-26`
+				base=`grep -w y1_2: fort.50 | cut -c 16-22`
+				n2=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+			fi
+			if [ $radius3 ]; then
+				exp=`grep -w y1_3: fort.50 | cut -c 24-26`
+				base=`grep -w y1_3: fort.50 | cut -c 16-22`
+				n3=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+			fi
+				
+				# average them
+			if [ $radius1 ] && [ $radius2 ]; then
+				avg=`echo "scale=4; ($n1 + $n2)/2" | bc`
+			elif [ $radius1 ] && [ $radius3 ]; then
+				avg=`echo "scale=4; ($n1 + $n3)/2" | bc`
+			elif [ $radius2 ] && [ $radius3 ]; then
+				avg=`echo "scale=4; ($n2 + $n3)/2" | bc`
+			fi
+		fi #END COMMENTBLOCK
+	fi
+	echo $avg
+}
+
+function RcoR0
+{
+	checkConvergence
+	if [ $stable ]; then avg="NaN"
+	else
+			# get values from correct radii
+		if [ $radius1 ]; then
+			exp=`grep -w Rco/R01: fort.50 | cut -c 26-28`
+			base=`grep -w Rco/R01: fort.50 | cut -c 18-24`
+			n1=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+		if [ $radius2 ]; then
+			exp=`grep -w Rco/R02: fort.50 | cut -c 26-28`
+			base=`grep -w Rco/R02: fort.50 | cut -c 18-24`
+			n2=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+		if [ $radius3 ]; then
+			exp=`grep -w Rco/R03: fort.50 | cut -c 26-28`
+			base=`grep -w Rco/R03: fort.50 | cut -c 18-24`
+			n3=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+			
+			# average them
+		if [ $radius1 ] && [ $radius2 ]; then
+			avg=`echo "scale=4; ($n1 + $n2)/2" | bc`
+		elif [ $radius1 ] && [ $radius3 ]; then
+			avg=`echo "scale=4; ($n1 + $n3)/2" | bc`
+		elif [ $radius2 ] && [ $radius3 ]; then
+			avg=`echo "scale=4; ($n2 + $n3)/2" | bc`
+		fi
+	fi
+	
+	echo $avg
+}
+
+function rPhiR0
+{
+	if [ "$(Y2)" = "0" ]; then rPhiR0="NaN"; else
+		exp=`grep -w drho\ min/ro: fort.50 | cut -c 29-31`
+		base=`grep -w drho\ min/ro: fort.50 | cut -c 20-27`
+		rPhiR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	fi
+	echo $rPhiR0
+}
+
+function rGammaR0
+{
+	if [ "$(Y2)" = "0" ]; then rGammaR0="NaN"; else
+		exp=`grep -w R\ torque1: fort.50 | cut -c 27-29`
+		base=`grep -w R\ torque1: fort.50 | cut -c 19-25`
+		rGammaR0=`echo "scale=4; ($base/1)*10^(0$exp)" | bc`
+	fi
+	echo $rGammaR0
+}
+	
+function RilrR0
+{
+	checkConvergence
+	if [ $stable ]; then avg="NaN"
+	else
+			# get values from correct radii
+		if [ $radius1 ]; then
+			exp=`grep -w lindin1: fort.50 | cut -c 24-26`
+			base=`grep -w lindin1: fort.50 | cut -c 16-22`
+			n1=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+		if [ $radius2 ]; then
+			exp=`grep -w lindin2: fort.50 | cut -c 24-26`
+			base=`grep -w lindin2: fort.50 | cut -c 16-22`
+			n2=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+		if [ $radius3 ]; then
+			exp=`grep -w lindin3: fort.50 | cut -c 24-26`
+			base=`grep -w lindin3: fort.50 | cut -c 16-22`
+			n3=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+			
+			# average them
+		if [ $radius1 ] && [ $radius2 ]; then
+			avg=`echo "scale=4; ($n1 + $n2)/2" | bc`
+		elif [ $radius1 ] && [ $radius3 ]; then
+			avg=`echo "scale=4; ($n1 + $n3)/2" | bc`
+		elif [ $radius2 ] && [ $radius3 ]; then
+			avg=`echo "scale=4; ($n2 + $n3)/2" | bc`
+		fi
+	fi
+
+	echo $avg
+}
+
+function mTorqueMd
+{	# returns first occurence in file
+	if [ "$(Y2)" = "0" ]; then mTorqueMd="NaN"; else
+		exp=`grep -m 1 M\ torque/M fort.50 | cut -c 29-31`
+		base=`grep -m 1 M\ torque/M fort.50 | cut -c 21-27`
+		mTorqueMd=`echo "scale=4; ($base/1*1)*10^(0$exp)" | bc`
+	fi
+	echo $mTorqueMd
+}
+    
+function jTorqueJ1
+{
+	if [ "$(Y2)" = "0" ]; then jTorqueJ1="NaN"; else
+		exp=`grep -w Jtorque/J1: fort.50 | cut -c 27-29`
+		base=`grep -w Jtorque/J1: fort.50 | cut -c 19-25`
+		jTorqueJ1=`echo "scale=4; ($base/1*1)*10^(0$exp)" | bc`
+	fi
+	echo $jTorqueJ1
+}
+
+function lindoutAvg
+{
+	checkConvergence
+	if [ $stable ]; then avg="NaN"
+	else
+			# get values from correct radii
+		if [ $radius1 ]; then
+			exp=`grep -w lindout1: fort.50 | cut -c 27-29`
+			base=`grep -w lindout1: fort.50 | cut -c 19-25`
+			n1=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+		if [ $radius2 ]; then
+			exp=`grep -w lindout2: fort.50 | cut -c 27-29`
+			base=`grep -w lindout2: fort.50 | cut -c 19-25`
+			n2=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+		if [ $radius3 ]; then
+			exp=`grep -w lindout3: fort.50 | cut -c 27-29`
+			base=`grep -w lindout3: fort.50 | cut -c 19-25`
+			n3=`echo "scale=10; ($base/1)*10^(0$exp)" | bc`
+		fi
+			
+			# average them
+		if [ $radius1 ] && [ $radius2 ]; then
+			avg=`echo "scale=4; ($n1 + $n2)/2" | bc`
+		elif [ $radius1 ] && [ $radius3 ]; then
+			avg=`echo "scale=4; ($n1 + $n3)/2" | bc`
+		elif [ $radius2 ] && [ $radius3 ]; then
+			avg=`echo "scale=4; ($n2 + $n3)/2" | bc`
+		fi
+	fi
+	echo $avg
+}
+
+function radstarMinus
+{
+	grep radstarMinus: fort.50 | awk '{ printf "%g", $2; }'
+}
+
+function radstar
+{
+	#Below is THE BEST way to get a value that I've found.
+    #Printed number must be in 2nd column; columns may be
+	#delimited by any number of spaces. 
+	grep radstar: fort.50 | awk '{ printf "%g", $2; }'
+
+	#A space in the name (i.e. "M torque/M1") will break it.
+	#This can be fixed by adding a sed command as follows:
+	#grep -m 1 M\ torque/M1: fort.50 | sed s@M\ torque/M1:@@ | awk '{ printf "%g", $1 }'
+}
+
+function radstarPlus
+{
+	grep radstarPlus: fort.50 | awk '{ printf "%g", $2; }'
+}
+
+
+
+cd $1
+echo `$2`

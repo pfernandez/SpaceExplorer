@@ -1,0 +1,140 @@
+#!/bin/bash
+#
+# This script will be executed when spaceExplorer.sh is run.
+#
+# Compiles and runs equilibrium and torus models and obtains results.
+# To restart models automatically if Y2 has not converged when maxSteps
+# has been reached, set "neverRestart" to "false" in the notDone
+# function at the top of the getValues script.
+
+prefix=$1
+n=$2
+q=$3
+M=$4
+jin=$5
+jmax=$6
+maxMCall=$7
+maxJinCall=$8
+MCall=$9
+jinCall=${10}
+MStart=${11}
+
+scriptDir=$(dirname `dirname $(pwd)`)
+val="$scriptDir/./getValues $(pwd)"
+
+chmod +x $scriptDir/getValues
+
+
+####################################################################################################
+# RUN EQUILIBRIUM MODEL
+
+echo "Compiling hscf.f..."
+cp $scriptDir/hscf.f .
+echo "
+	  parameter (jmax = ${jmax},
+     1           kmax = ${jmax}, 
+     2           max = 25000)
+
+c     32x32     wfw(452)
+c     64x64     wfw(1030)
+c     128x128   wfw(2315)
+c     256x256   wfw(5132)
+c     512x512   wfw(11279)
+c     1024x1024 wfw(24593)
+c     2048x2048 wfw(53264)
+" > param.h
+
+# ifort -O -mp -r8 -o hscf hscf.f
+gfortran -fdefault-real-8 -O2 -o hscf hscf.f
+
+echo "Running equilibrium model..."
+echo "1                                      :  0 = white dwarf   1 = polytrope
+0                                      :  0 = dead start    1 = jump start
+${n} -${q} ${jmax} ${jmax} ${jmax} -${jin} 0.0 0.8 ${M}  :  n n' jold kold jout kout log(rho) del starm
+" > hscf.in
+./hscf < hscf.in > hscf.out
+rm param.h hscf hscf.in hscf.f
+	
+	#plot eqContour
+echo "Generating contour plot..."
+r=`echo "scale=2; $($val rInOut)/1" | bc`
+plotCommand="
+reset\n
+set terminal png\n
+set output \"eqContour.png\"\n
+set title \"m${m}/n${n}/q${q}/r-+${r}-j${jin}/M${M}/${jmax}\"\n
+set contour\n
+set cntrparam levels incremental 1.0e-30,$(echo "scale=7; $($val rhomax)/10" | bc),$($val rhomax)\n
+set size square\n
+set grid\n
+set mxtics\n
+set mytics\n
+set nosurface\n
+set view 0,0\n
+set data style lines\n
+set nokey\n
+splot 'fort.47' ti \"fort.47\"\n
+"
+echo -e $plotCommand | gnuplot
+
+#
+####################################################################################################
+# START NEXT MODEL
+
+	# remove the old run script
+rm $(basename `pwd`)
+	
+	#store first star mass value and initialize counters
+if [ "$MStart" = "$NULL" ]; then
+	MStart=$M
+	MCall=0
+	jinCall=1
+fi
+
+	# increment recursive call counter for star mass
+MCall=$(($MCall + 1))
+
+	# find next star mass value
+# M=$(echo "e( .2 + l( ${M} ) )" | bc -l) # comment out for starmass = 0
+
+	# round star mass to correct number of digits
+if [ "$(echo "${M} < 10" | bc)" = "1" ]; then
+	M=$(printf "%.3f\n" ${M});
+elif [ "$(echo "${M} < 100" | bc)" = "1" ]; then
+	M=$(printf "%.2f\n" ${M});
+else
+	M=$(printf "%.1f\n" ${M})
+fi
+
+
+	# if maxed, reset star mass and counter, increment jin and its counter
+if [ $MCall -ge $maxMCall ]; then
+	MCall=0
+	M=$MStart
+	jinCall=$(($jinCall + 1))
+	jin=$(($jin + 6))
+fi
+
+	# if less than maximum recursions specified
+if [ $jinCall -le $maxJinCall ]; then
+	
+		# generate new model name and folder
+	runTitle=${prefix}n${n}q${q}M${M}j${jin}
+	runDir=$(dirname `pwd`)/$runTitle
+	mkdir -p $runDir
+	
+		# go to folder and create new run script
+	cd $runDir
+	echo "cd $runDir" > $runTitle
+	echo "$scriptDir/./eqStarDisks $prefix $n $q $M $jin $jmax $maxMCall $maxJinCall $MCall $jinCall $MStart" >> $runTitle
+	
+		# execute run script
+	echo -e "\nStarting another run..."
+	qsub -l nodes=1:ppn=1,walltime=168:00:00 -j oe -o output.txt ./$runTitle
+
+else
+	echo -e "\nDone."
+fi
+
+#
+####################################################################################################
